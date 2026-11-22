@@ -1,0 +1,30 @@
+{
+ "name": "Aprende Português",
+ "short_name": "Aprende",
+ "description": "Learn European Portuguese (and German) with flashcards, conversations, podcasts and games.",
+ "start_url": "./",
+ "scope": "./",
+ "display": "standalone",
+ "orientation": "portrait",
+ "background_color": "#F2F5FA",
+ "theme_color": "#1F4FA3",
+ "lang": "pt",
+ "icons": [
+  {
+   "src": "icons/icon-192.png",
+   "sizes": "192x192",
+   "type": "image/png"
+  },
+  {
+   "src": "icons/icon-512.png",
+   "sizes": "512x512",
+   "type": "image/png"
+  },
+  {
+   "src": "icons/icon-maskable-512.png",
+   "sizes": "512x512",
+   "type": "image/png",
+   "purpose": "maskable"
+  }
+ ]
+}
