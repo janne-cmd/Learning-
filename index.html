@@ -2132,8 +2132,7 @@ function journey(){
    nodes.push({id:t.id+':g'+c,type:'game',game:gm,title:GNAME[gm],sub:'Practise these words',words:ch.map(w=>w.id)});
   }
   (DLG_AT[t.id]||[]).forEach(did=>{const d=DLG(did);if(d)nodes.push({id:t.id+':t'+did,type:'talk',dlg:did,title:'Talk: '+d.n,sub:'Conversation with '+d.who});});
-  (COURSE()==='pt'?GR_AT[t.id]||[]:[]).forEach(id=>{const G=GRAM.find(g=>g.id===id);if(G)nodes.push({id:t.id+':r'+id,type:'gram',gr:id,title:'Grammar: '+G.t,sub:'Explanation, examples and 10 questions'});});
-  (COURSE()==='pt'?VB_AT[t.id]||[]:[]).forEach(id=>{const L=vLesson(id);if(L)nodes.push({id:t.id+':v'+id,type:'verb',vb:id,title:'Verbs: '+L.t,sub:'Conjugation: tables and 12 questions'});});
+  if(COURSE()==='pt'){const x=jxItem(u,t);if(x)nodes.push(x);}
   nodes.push({id:t.id+':c',type:'check',title:'Unit check',sub:'A short quiz on this unit',words:ws.map(w=>w.id)});
   if(u%3===2)nodes.push({id:t.id+':q',type:'game',game:'quest',title:'Vocabulary Quest',sub:'Milestone level: run, jump, answer',words:[]});
   nodes.forEach(n=>{n.unit=t.id;n.i=gi++;});
@@ -2142,13 +2141,15 @@ function journey(){
  return out;
 }
 const flat=()=>journey().reduce((a,u)=>a.concat(u.nodes),[]);
-const nextNode=()=>flat().find(n=>!jdone(n))||null;
+/* the small verb and grammar steps are optional in units you have already finished */
+const jExtra=n=>n.type==='verb'||n.type==='gram';
+const nextNode=()=>{for(const u of journey()){const regDone=u.nodes.filter(n=>!jExtra(n)).every(jdone);for(const n of u.nodes){if(jdone(n))continue;if(jExtra(n)&&regDone)continue;return n;}}return null;};
 function finishNode(n,st){if(!n)return;const old=S.jny[n.id];const first=old===undefined||old<0;S.jny[n.id]=Math.max(old>0?old:0,st);if(first)addXP(10);else save();}
 function launch(n){
  stopGame();ui.sess=ui.d=ui.g=ui.c=null;ui.vb=null;ui.pr=null;ui.sheet=null;ui.node=n;
  if(n.type==='learn')startSession(n.words.slice(),TB[n.unit].n,n);
  else if(n.type==='talk')dStart(n.dlg,n);
- else if(n.type==='check')chkStart(n);else if(n.type==='verb')vbOpen(n.vb,n);else if(n.type==='gram')grOpen(n.gr,n);
+ else if(n.type==='check')chkStart(n);else if(n.type==='verb')vbOpen(n.vb,n,n.verb);else if(n.type==='gram')grOpen(n.gr,n,true);
  else{const o={node:n,words:W(n.words)};if(n.game==='match')startMatch(false,o);else if(n.game==='build')startBuild(o);else if(n.game==='listen')startListen(o);else if(n.game==='memory')startMemory(o);else if(n.game==='swipe')startSwipe(o);else if(n.game==='balloon')startBalloon(o);else startQuest(o);}
 }
 function toJourney(){stopGame();ui.sess=ui.d=ui.g=ui.c=null;ui.vb=null;ui.pr=null;ui.screen='learn';ui.lt='journey';ui.topic=null;ui.scrollCur=true;window.scrollTo(0,0);render();}
@@ -2200,7 +2201,7 @@ function vJourney(){
  }).join('');
  return '<div class="card flat"><div class="mut sm" style="margin-bottom:6px">'+done+' of '+all.length+' steps</div>'+bar(all.length?done/all.length:0)+'</div>'+units;
 }
-function journeyCard(){const all=flat(),done=all.filter(jdone).length,J=journey(),units=J.filter(u=>u.nodes.every(jdone)).length;
+function journeyCard(){const all=flat(),done=all.filter(jdone).length,J=journey(),units=J.filter(u=>u.nodes.filter(n=>!jExtra(n)).every(jdone)).length;
  return '<div class="card"><div class="row"><div class="grow"><h3>Learning journey</h3><div class="mut sm">'+done+' of '+all.length+' steps · '+units+' of '+J.length+' units complete</div></div><button class="btn sm ghost" data-act="jnext">Continue</button></div><div style="margin-top:10px">'+bar(all.length?done/all.length:0)+'</div></div>';}
 function vTopic(){
  const t=TB[ui.topic];const ws=t.words;
@@ -3822,16 +3823,18 @@ function vVerbs(){
  +VLESSONS.map((l,i)=>{const st=vbStars(l.id);return '<button class="card flat" style="text-align:left;cursor:pointer;width:100%" data-act="vbopen" data-id="'+l.id+'"><div class="row"><span class="podic">'+ic('learn',22)+'</span><div class="grow"><div class="mut sm">'+(i+1)+' · '+esc((VTN[l.tn]||['Mistura'])[0])+'</div><h3>'+esc(l.t)+'</h3><div class="mut sm">'+esc(l.verbs.slice(0,5).join(', '))+(l.verbs.length>5?' …':'')+'</div></div>'+(st?'<span class="chip blue">'+'★'.repeat(st)+'</span>':'')+'</div></button>';}).join('');
 }
 /* ---------- lesson: explanation and tables ---------- */
-function vbOpen(id,node){stopAudio();ui.vb={id,node:node||null,mode:'learn'};window.scrollTo(0,0);render();}
+/* journey steps practise ONE verb (verb set): the lesson shrinks to that verb and 6 questions */
+const vCur=v=>{const L=vLesson(v.id);return v.verb&&L?Object.assign({},L,{verbs:[v.verb],mix:null,micro:true}):L;};
+function vbOpen(id,node,verb){stopAudio();ui.vb={id,node:node||null,mode:'learn',verb:verb||null};window.scrollTo(0,0);render();}
 function vbTable(inf,tn){const F=vForms(inf,tn);if(!F)return '';
  return '<div class="card flat vbtab"><div class="row"><div class="grow"><b style="font-size:1.15rem">'+esc(inf)+'</b><div class="mut sm">'+esc(vMean(inf))+'</div></div><button class="chipb2" data-act="vbplay" data-inf="'+esc(inf)+'" data-tn="'+tn+'">'+ic('spk',16)+'All</button></div>'
  +F.map((f,i)=>'<div class="crow vbrow"><span class="mut">'+PERS[i]+'</span><b class="grow" style="text-align:right">'+esc(f)+'</b>'+spk(vSay(i,f))+'</div>').join('')+'</div>';}
 function vVbLearn(){
- const v=ui.vb,L=vLesson(v.id),tns=L.mix||[L.tn];
+ const v=ui.vb,L=vCur(v),tns=L.mix||[L.tn];
  return '<div class="stack"><div class="row"><button class="ib" data-act="vbx" aria-label="Back">'+ic('back')+'</button><div class="grow"><div class="mut sm">Verb trainer · '+esc(tns.map(t=>VTN[t][0]).join(' / '))+'</div><h2>'+esc(L.t)+'</h2></div></div>'
  +'<div class="de">'+esc(L.tip)+'</div>'
  +(L.mix?tns.map(t=>'<h3>'+esc(VTN[t][0])+' <span class="mut sm">'+esc(VTN[t][1])+'</span></h3>'+L.verbs.slice(0,3).map(inf=>vbTable(inf,t)).join('')).join(''):L.verbs.map(inf=>vbTable(inf,L.tn)).join(''))
- +'<button class="btn xl block sun" data-act="vbgo">Practise · 12 questions</button></div>';
+ +'<button class="btn xl block sun" data-act="vbgo">Practise · '+(L.micro?6:12)+' questions</button>'+(L.micro?'<p class="mut sm" style="text-align:center">One verb at a time. The full lesson with all verbs is under Practice.</p>':'')+'</div>';
 }
 async function vbPlay(inf,tn){const F=vForms(inf,tn);if(!F)return;for(let i=0;i<F.length;i++){if(!ui.vb)return;await sayP(vSay(i,F[i]));await new Promise(r=>setTimeout(r,250));}}
 /* ---------- practice ---------- */
@@ -3844,9 +3847,9 @@ function vbQuestion(it,k){
   opts=shuf([it.f].concat(shuf([...pool]).slice(0,3)));}
  return Object.assign({},it,{type,opts});
 }
-function vbStart(id,node){const L=vLesson(id);if(!L)return;stopGame();ui.sess=ui.d=ui.g=ui.c=null;
- const items=shuf(vbItems(L));const qs=[];for(let k=0;k<12;k++)qs.push(vbQuestion(items[k%items.length],k));
- ui.vb={id,node:node||(ui.vb&&ui.vb.node)||null,mode:'quiz',qs,i:0,ok:0,ans:null,typed:'',L};window.scrollTo(0,0);render();}
+function vbStart(id,node,verb){const L=vCur({id,verb});if(!L)return;stopGame();ui.sess=ui.d=ui.g=ui.c=null;
+ const nq=L.micro?6:12;const items=shuf(vbItems(L));const qs=[];for(let k=0;k<nq;k++)qs.push(vbQuestion(items[k%items.length],k));
+ ui.vb={id,verb:verb||null,node:node||(ui.vb&&ui.vb.node)||null,mode:'quiz',qs,i:0,ok:0,ans:null,typed:'',L};window.scrollTo(0,0);render();}
 function vbReview(){S.vbw=S.vbw||[];const done=VLESSONS.filter(l=>vbStars(l.id)>0);if(!done.length)return;
  const pool=shuf(done.flatMap(vbItems));const weak=shuf(S.vbw.map(w=>{const F=vForms(w.inf,w.tn);return F?{inf:w.inf,tn:w.tn,pi:w.pi,f:F[w.pi]}:null;}).filter(Boolean));
  const items=weak.slice(0,8).concat(pool).slice(0,12);const qs=items.map((it,k)=>vbQuestion(it,k));
@@ -3879,12 +3882,12 @@ function vbType(){const v=ui.vb;if(!v||v.ans!=null)return;const q=v.qs[v.i];cons
 function vbNext(){const v=ui.vb;if(!v)return;v.i++;v.ans=null;v.pick=null;v.typed='';
  if(v.i>=v.qs.length){vbFinish();return;}render();const q=v.qs[v.i];if(q.type==='ear')setTimeout(()=>say(vSay(q.pi,q.f),false,true),250);
  setTimeout(()=>{const el=$('#vbin');if(el)el.focus();},60);}
-function vbFinish(){const v=ui.vb,n=v.qs.length,st=v.ok>=11?3:v.ok>=9?2:v.ok>=6?1:0;const xp=v.ok*3+10;addXP(xp);wkInc('games',1);
- if(v.id!=='rev'&&st>0){S.vb=S.vb||{};S.vb[v.id]={st:Math.max(st,vbStars(v.id))};}
+function vbFinish(){const v=ui.vb,n=v.qs.length,r=v.ok/n,st=r>=.9?3:r>=.7?2:r>=.5?1:0;const xp=v.ok*3+10;addXP(xp);wkInc('games',1);
+ if(v.id!=='rev'&&!v.verb&&st>0){S.vb=S.vb||{};S.vb[v.id]={st:Math.max(st,vbStars(v.id))};}
  if(v.node&&st>0)finishNode(v.node,st);save();v.mode='done';v.st=st;v.xp=xp;celebrate(st>0);render();}
 function vVbDone(){const v=ui.vb;
  const again='<button class="btn" data-act="vbx">Back to the verbs</button><button class="btn ghost" data-act="'+(v.id==='rev'?'vbrev':'vbgo')+'">Practise again</button>';
- return resHTML({win:v.st>0,stars:v.st,title:v.st>0?'Well done!':'Keep practising',sub:v.ok+' of '+v.qs.length+' right · +'+v.xp+' XP'+(v.st>0?'':'<br>You need 6 right answers to pass. Look at the tables again and try once more.'),btns:v.node&&v.st>0?sumBtns(v.node,again):again});}
+ return resHTML({win:v.st>0,stars:v.st,title:v.st>0?'Well done!':'Keep practising',sub:v.ok+' of '+v.qs.length+' right · +'+v.xp+' XP'+(v.st>0?'':'<br>You need half of the answers right to pass. Look at the tables again and try once more.'),btns:v.node&&v.st>0?sumBtns(v.node,again):again});}
 function vVb(){const v=ui.vb;if(v.mode==='learn')return vVbLearn();if(v.mode==='done')return vVbDone();return vVbQuiz();}
 document.addEventListener('keydown',e=>{if(e.target&&e.target.id==='vbin'&&e.key==='Enter'){e.preventDefault();vbType();}});
 function verbCard(){if(COURSE()!=='pt')return '';S.vb=S.vb||{};const L=VLESSONS.find(l=>!vbStars(l.id));const weak=(S.vbw||[]).length;
@@ -3968,17 +3971,24 @@ document.addEventListener('keydown',e=>{if(e.target&&e.target.id==='dcin'&&e.key
 /* ---------- grammar ---------- */
 const grStars=id=>{S.gr=S.gr||{};return (S.gr[id]||{}).st||0;};
 const grFull=q=>q[0].replace('___',q[1][q[2]]);
+/* journey: at most ONE extra step per unit. Every fifth unit a short grammar lesson, the others one verb in one tense. */
+let JX=null;
+function jxSeq(){if(JX)return JX;const G=['g1','g2','g3','g4','g10','g5','g6','g7','g8','g11','g9','g12'];const V=[];VLESSONS.filter(l=>!l.mix).forEach(l=>l.verbs.forEach(v=>V.push([l.id,v])));return JX={G,V};}
+function jxItem(u,t){const {G,V}=jxSeq();const gs=k=>k%5===3&&Math.floor(k/5)<G.length;
+ if(gs(u)){const g=GRAM.find(x=>x.id===G[Math.floor(u/5)]);return {id:t.id+':r'+g.id,type:'gram',gr:g.id,title:'Grammar: '+g.t,sub:'Short lesson · 5 questions'};}
+ let j=0;for(let k=0;k<u;k++)if(!gs(k))j++;const it=V[j];if(!it)return null;const L=vLesson(it[0]);
+ return {id:t.id+':v'+it[0]+'-'+it[1],type:'verb',vb:it[0],verb:it[1],title:'Verb: '+it[1]+' · '+VTN[L.tn][0],sub:'One verb: table and 6 questions'};}
 const GR_AT={greet:['g1'],intro:['g10'],q:['g2'],adj:['g4'],people:['g8'],num:['g3'],feel:['g5'],time:['g6'],conn:['g7'],verbs2:['g11'],verbs3:['g9'],dates:['g12']};
-function grOpen(id,node){stopGame();ui.pr={k:'gr',id,node:node||null,mode:'learn'};window.scrollTo(0,0);render();}
-function grGo(){const p=ui.pr,G=GRAM.find(g=>g.id===p.id);p.mode='quiz';p.qs=shuf(G.q.map(q=>{const o=q[1].map((t,i)=>({t,ok:i===q[2]}));return {q,opts:shuf(o)};}));p.i=0;p.ok=0;p.ans=null;render();window.scrollTo(0,0);}
+function grOpen(id,node,short){stopGame();ui.pr={k:'gr',id,node:node||null,mode:'learn',short:!!short};window.scrollTo(0,0);render();}
+function grGo(){const p=ui.pr,G=GRAM.find(g=>g.id===p.id);p.mode='quiz';p.qs=shuf(G.q.map(q=>{const o=q[1].map((t,i)=>({t,ok:i===q[2]}));return {q,opts:shuf(o)};})).slice(0,p.short?5:10);p.i=0;p.ok=0;p.ans=null;render();window.scrollTo(0,0);}
 function grPick(i){const p=ui.pr;if(p.ans!=null)return;const it=p.qs[p.i];p.ans=i;if(it.opts[i].ok){p.ok++;cheer(3);}else{boo();S.grw=S.grw||{};S.grw[p.id]=(S.grw[p.id]||0)+1;}save();render();setTimeout(()=>say(grFull(it.q),false,true),200);}
 function grNext(){const p=ui.pr;p.i++;p.ans=null;if(p.i<p.qs.length){render();return;}
- const st=p.ok>=9?3:p.ok>=7?2:p.ok>=5?1:0;p.mode='done';p.st=st;p.xp=p.ok*3+10;addXP(p.xp);wkInc('games',1);
- if(st>0){S.gr=S.gr||{};S.gr[p.id]={st:Math.max(st,grStars(p.id))};if(S.grw)S.grw[p.id]=0;}if(p.node&&st>0)finishNode(p.node,st);save();celebrate(st>0);render();}
+ const r=p.ok/p.qs.length,st=r>=.9?3:r>=.7?2:r>=.5?1:0;p.mode='done';p.st=st;p.xp=p.ok*3+10;addXP(p.xp);wkInc('games',1);
+ if(st>0&&!p.short){S.gr=S.gr||{};S.gr[p.id]={st:Math.max(st,grStars(p.id))};if(S.grw)S.grw[p.id]=0;}if(p.node&&st>0)finishNode(p.node,st);save();celebrate(st>0);render();}
 function vGr(){const p=ui.pr,G=GRAM.find(g=>g.id===p.id);
  const head=t=>'<div class="row"><button class="ib" data-act="prx" aria-label="Back">'+ic(p.mode==='quiz'?'x':'back')+'</button><div class="grow"><div class="mut sm">Grammar · '+G.lv+'</div><h2>'+esc(G.t)+'</h2></div>'+(t||'')+'</div>';
- if(p.mode==='learn')return '<div class="stack">'+head()+'<div class="de">'+esc(G.tip)+'</div><h3>Examples</h3>'+G.ex.map(e=>'<div class="card flat"><div class="row"><div class="grow"><b>'+tw(e[0])+'</b><div class="mut sm">'+esc(e[1])+'</div></div>'+spk(e[0])+'</div></div>').join('')+'<button class="btn xl block sun" data-act="grgo">Practise · 10 questions</button></div>';
- if(p.mode==='done'){const again='<button class="btn" data-act="prx">Back to practice</button><button class="btn ghost" data-act="grgo">Practise again</button>';return resHTML({win:p.st>0,stars:p.st,title:p.st>0?'Well done!':'Keep practising',sub:p.ok+' of 10 right · +'+p.xp+' XP',btns:p.node&&p.st>0?sumBtns(p.node,again):again});}
+ if(p.mode==='learn')return '<div class="stack">'+head()+'<div class="de">'+esc(G.tip)+'</div><h3>Examples</h3>'+G.ex.map(e=>'<div class="card flat"><div class="row"><div class="grow"><b>'+tw(e[0])+'</b><div class="mut sm">'+esc(e[1])+'</div></div>'+spk(e[0])+'</div></div>').join('')+'<button class="btn xl block sun" data-act="grgo">Practise · '+(p.short?5:10)+' questions</button></div>';
+ if(p.mode==='done'){const again='<button class="btn" data-act="prx">Back to practice</button><button class="btn ghost" data-act="grgo">Practise again</button>';return resHTML({win:p.st>0,stars:p.st,title:p.st>0?'Well done!':'Keep practising',sub:p.ok+' of '+p.qs.length+' right · +'+p.xp+' XP',btns:p.node&&p.st>0?sumBtns(p.node,again):again});}
  const it=p.qs[p.i],q=it.q;
  return '<div class="stack"><div class="row"><button class="ib" data-act="prx" aria-label="Close">'+ic('x')+'</button><div class="grow"><div class="pbar"><i style="width:'+Math.round(p.i/p.qs.length*100)+'%"></i></div></div><span class="mut sm">'+(p.i+1)+' / '+p.qs.length+'</span></div>'
  +'<div class="pcard pop-in" style="align-items:stretch"><div class="lab">'+esc(G.t)+'</div><div class="word" style="font-size:1.4rem">'+esc(q[0]).replace('___','<span class="gap">'+(p.ans!=null?esc(q[1][q[2]]):'____')+'</span>')+'</div></div>'
@@ -4915,7 +4925,7 @@ function act(a,b){
  case 'ser':lrOpen('ser',D.id);break;
  case 'stats':ui.st=true;render();window.scrollTo(0,0);break;
  case 'stx':ui.st=null;render();window.scrollTo(0,0);break;
- case 'vbgo':vbStart(ui.vb.id,ui.vb.node);break;
+ case 'vbgo':vbStart(ui.vb.id,ui.vb.node,ui.vb.verb);break;
  case 'vbrev':vbReview();break;
  case 'vbplay':vbPlay(D.inf,D.tn);break;
  case 'vbpick':vbPick(+D.i);break;
@@ -5046,7 +5056,7 @@ document.addEventListener('keydown',e=>{
  if(ui.g&&ui.g.k==='quest'&&(e.code==='Space'||e.code==='ArrowUp')&&!(e.target&&/INPUT|TEXTAREA|SELECT/.test(e.target.tagName))){e.preventDefault();qJump();}
  if(e.key==='Enter'&&e.target&&e.target.classList&&e.target.classList.contains('fc')){e.preventDefault();e.target.click();}
 });
-window.__app={AU,COURSE,TLANG,lookWord,vForms,VLESSONS,say,sfx,hasClip,flat,nextNode,journey,jdone,launch,gsrc,S:()=>S,ui:()=>ui,render,act,WORDS,TB,path,pool,mkQ,startMill,startBuild,startListen,startMatch,startQuest,chkStart,dStart,startSession,newIds,dueIds};
+window.__app={AU,COURSE,TLANG,lookWord,vForms,VLESSONS,nextNode,launch,say,sfx,hasClip,flat,nextNode,journey,jdone,launch,gsrc,S:()=>S,ui:()=>ui,render,act,WORDS,TB,path,pool,mkQ,startMill,startBuild,startListen,startMatch,startQuest,chkStart,dStart,startSession,newIds,dueIds};
 plLoad();load();render();
 })();
 </script>
