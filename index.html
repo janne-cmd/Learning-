@@ -506,6 +506,10 @@ details.bulk summary{cursor:pointer;font-weight:700;color:var(--blue)}
 .podsp{font-size:.72rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--grape)}
 .podline.sp-D .podsp{color:var(--skyc)}
 
+.t-emer{background:linear-gradient(135deg,#5BE3A1,#0E8F5A)}.t-saph{background:linear-gradient(135deg,#6FB6FF,#1A3FB8)}.t-amet{background:linear-gradient(135deg,#C99BFF,#6A2DB8)}
+.t-obs{background:linear-gradient(135deg,#5B6275,#151A26)}.t-fire{background:linear-gradient(135deg,#FFD36B,#FF5A1F)}.t-cosmo{background:linear-gradient(135deg,#FF7AD9,#3A2BD1 60%,#0B0F3A)}
+.t-myth{background:conic-gradient(from 180deg,#FFD465,#FF6B8B,#7B5CFF,#4FD8E8,#FFD465);color:#20123A}
+
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 <div class="app">
@@ -2995,8 +2999,9 @@ function trKey(k){
 }
 document.addEventListener('keydown',e=>{const g=ui.g;if(!g||g.k!=='tram'||g.res!=null||e.ctrlKey||e.metaKey||e.altKey)return;const k=plain(e.key||'');if(/^[a-z]$/.test(k)){e.preventDefault();trKey(k);}});
 
-/* ---------- player levels: 30 levels, rising XP steps, avatar rewards ---------- */
-const LMAX=30;
+/* ---------- player levels: 100 levels, rising XP steps, avatar rewards ----------
+   Levels 1-30 have their own titles; from 31 on, every ten levels share a title with a number (I-X) and a new tier colour. */
+const LMAX=100;
 const LTIT=['Turista','Visitante','Aprendiz','Curioso','Explorador','Viajante','Estudante','Falador','Conversador','Amigo dos locais',
  'Freguês','Vizinho','Marinheiro','Navegador','Descobridor','Fadista','Poeta','Contador de histórias','Residente','Alfacinha',
  'Tripeiro','Mestre do café','Rei do bacalhau','Sábio','Embaixador','Professor','Quase nativo','Lenda','Herói nacional','Português de gema'];
@@ -3009,13 +3014,22 @@ const LTIT_ES=['Turista','Visitante','Aprendiz','Curioso','Explorador','Viajero'
 const LDE_ES=['Tourist','Visitor','Apprentice','Curious one','Explorer','Traveller','Student','Chatterbox','Conversationalist','Friend of the locals',
  'Regular customer','Neighbour','Sailor','Navigator','Discoverer','Flamenco singer','Poet','Storyteller','Resident','Madrid local',
  'Seville local','Coffee master','King of paella','Wise one','Ambassador','Teacher','Almost native','Legend','National hero','Spanish through and through'];
-const ltit=i=>(COURSE()==='es'?LTIT_ES:LTIT)[i];
-const TIERS=[['bronze','Bronze'],['silver','Silver'],['gold','Gold'],['azul','Azulejo'],['ruby','Ruby'],['dia','Diamond']];
-const tierOf=n=>TIERS[Math.min(5,Math.floor((n-1)/5))];
-const LREW={3:'🐱',5:'🐶',7:'🦜',9:'🐳',11:'🦩',13:'🦋',15:'🦅',18:'🦚',21:'🐉',24:'🦈',27:'👑',30:'🏆'};
-const xpFor=n=>{let s=0;for(let i=1;i<n;i++)s+=100+20*(i-1);return s;};
+const LHI=[['Guardião da língua','Keeper of the language','Guardián de la lengua'],['Mestre das palavras','Master of words','Maestro de las palabras'],['Navegador dos verbos','Navigator of verbs','Navegante de los verbos'],
+ ['Cavaleiro da saudade','Knight of saudade','Caballero del duende'],['Grão-mestre','Grandmaster','Gran maestro'],['Lenda viva','Living legend','Leyenda viva'],['Imortal','Immortal','Inmortal']];
+const ROM=['I','II','III','IV','V','VI','VII','VIII','IX','X'];
+function hiTitle(i,k){if(i===99)return k===0?'Camões':(k===1?'Camões himself':'Cervantes');const b=Math.floor((i-30)/10);return LHI[b][k]+' '+ROM[(i-30)%10];}
+const ltit=i=>i>=30?hiTitle(i,COURSE()==='es'?2:0):(COURSE()==='es'?LTIT_ES:LTIT)[i];
+const lde=i=>i>=30?hiTitle(i,1):(COURSE()==='es'?LDE_ES:LDE)[i];
+const TIERS=[['bronze','Bronze'],['silver','Silver'],['gold','Gold'],['azul','Azulejo'],['ruby','Ruby'],['dia','Diamond'],
+ ['emer','Emerald'],['saph','Sapphire'],['amet','Amethyst'],['obs','Obsidian'],['fire','Sunfire'],['cosmo','Cosmic'],['myth','Mythic']];
+const tierOf=n=>n<=30?TIERS[Math.min(5,Math.floor((n-1)/5))]:TIERS[6+Math.min(6,Math.floor((n-31)/10))];
+const LREW={3:'🐱',5:'🐶',7:'🦜',9:'🐳',11:'🦩',13:'🦋',15:'🦅',18:'🦚',21:'🐉',24:'🦈',27:'👑',30:'🏆',
+ 33:'🐨',35:'🦒',38:'🐯',40:'🦥',43:'🦭',45:'🦖',48:'🐊',50:'🌋',53:'🪼',55:'🦑',58:'🐋',60:'🌈',63:'🧜',65:'🧙',68:'🥷',70:'🚀',
+ 73:'🛸',75:'🌌',78:'🧞',80:'💎',83:'🔥',85:'⚡',88:'🌟',90:'👾',93:'🐲',95:'🎖️',98:'🏰',100:'🏛️'};
+/* steps grow by 20 XP per level up to 30, then faster, so the high levels take weeks */
+const xpFor=n=>{let s=0;for(let i=1;i<n;i++)s+=100+20*(i-1)+(i>=30?40*(i-29):0);return s;};
 const lvlOf=xp=>{let n=1;while(n<LMAX&&xp>=xpFor(n+1))n++;return n;};
-function lvlInfo(){const n=lvlOf(S.xp),a=xpFor(n),b=xpFor(n+1),max=n>=LMAX;return{n,title:ltit(n-1),de:(COURSE()==='es'?LDE_ES:LDE)[n-1],tier:tierOf(n),into:max?1:(S.xp-a)/(b-a),need:max?0:b-S.xp,max};}
+function lvlInfo(){const n=lvlOf(S.xp),a=xpFor(n),b=xpFor(n+1),max=n>=LMAX;return{n,title:ltit(n-1),de:lde(n-1),tier:tierOf(n),into:max?1:(S.xp-a)/(b-a),need:max?0:b-S.xp,max};}
 const avUnlocked=a=>{const lv=Object.keys(LREW).find(k=>LREW[k]===a);return !lv||lvlOf(S.xp)>=+lv;};
 const lvBadge=(n,cls)=>'<span class="lvbadge t-'+tierOf(n)[0]+' '+(cls||'')+'">'+n+'</span>';
 function levelPath(){
