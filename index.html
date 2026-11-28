@@ -1868,9 +1868,29 @@ function packBuf(i,urgent){
  if(AU.packs[i]){if(urgent&&AU.packs[i].queued){const k=AU.q.indexOf(AU.packs[i].job);if(k>0){AU.q.splice(k,1);AU.q.unshift(AU.packs[i].job);}}return AU.packs[i];}
  let job;const pr=new Promise((res,rej)=>{job=async()=>{pr.queued=false;let err;for(let a=0;a<3;a++){try{const b=await fetchTO(APACK.files[i],a?25000:15000);res(b);return;}catch(e){err=e;await new Promise(r=>setTimeout(r,600*(a+1)));}}delete AU.packs[i];rej(err);};});
  pr.queued=true;pr.job=job;AU.packs[i]=pr;if(urgent)AU.q.unshift(job);else AU.q.push(job);packPump();return pr;}
+/* Only the bytes of the one clip are downloaded (HTTP range request, about 8 KB), not its whole pack (about 1.4 MB).
+   Before, the first words after a start needed 10-20 MB of packs, and the voice stayed silent until they had arrived:
+   that is why it only worked after a few restarts (by then the packs were in the cache).
+   If a server ignores ranges, the whole pack is used as before. */
+AU.cr={};AU.crq=[];AU.crRun=0;
+function crPump(){while(AU.crRun<4&&AU.crq.length){const job=AU.crq.shift();AU.crRun++;job().finally(()=>{AU.crRun--;crPump();});}}
+function clipRange(e,urgent){
+ const k=e[0]+':'+e[1];if(AU.cr[k])return AU.cr[k];
+ let job;const pr=new Promise((res,rej)=>{job=async()=>{let err;
+  for(let a=0;a<3;a++){
+   if(AU.noRange||AU.packs[e[0]]){try{const buf=await packBuf(e[0],true);res(new Uint8Array(buf.slice(e[1],e[1]+e[2])));return;}catch(x){err=x;break;}}
+   try{const r=await Promise.race([fetch(APACK.files[e[0]],{headers:{Range:'bytes='+e[1]+'-'+(e[1]+e[2]-1)}}),new Promise((_,j)=>setTimeout(()=>j('clip timeout'),a?9000:5000))]);
+    if(r.status===206){const b=new Uint8Array(await r.arrayBuffer());if(b.length===e[2]){res(b);return;}err='short clip';}
+    else if(r.ok){AU.noRange=true;const buf=await r.arrayBuffer();AU.packs[e[0]]=Promise.resolve(buf);res(new Uint8Array(buf.slice(e[1],e[1]+e[2])));return;}
+    else err='clip '+r.status;}catch(x){err=x;}
+   await new Promise(r=>setTimeout(r,400*(a+1)));}
+  delete AU.cr[k];rej(err);};});
+ AU.cr[k]=pr;if(urgent)AU.crq.unshift(job);else AU.crq.push(job);crPump();
+ const ks=Object.keys(AU.cr);if(ks.length>500)delete AU.cr[ks[0]];
+ return pr;}
 async function clipBytes(t){
  const ix=packIx(),e=ix&&ix[t];
- if(e&&!AU.packDead){try{const buf=await packBuf(e[0],AU.urgent===t);return new Uint8Array(buf.slice(e[1],e[1]+e[2]));}catch(err){if(location.protocol==='file:')AU.packDead=true;if(!AUDIO[t])throw err;}}
+ if(e&&!AU.packDead){try{return await clipRange(e,AU.urgent===t);}catch(err){if(location.protocol==='file:')AU.packDead=true;if(!AUDIO[t])throw err;}}
  if(COURSE()==='pt'&&AUDIO[t])return b64bytes(AUDIO[t]);
  throw 'no recording';
 }
@@ -1950,12 +1970,12 @@ function getBuf(t){
  const pr=clipBytes(t).then(b=>decode(c,b)).then(b=>{AU.bufs[t]=b;delete AU.pend[t];const ks=Object.keys(AU.bufs);if(ks.length>BUFMAX)delete AU.bufs[ks[0]];return b;},e=>{delete AU.pend[t];throw e;});
  AU.pend[t]=pr;return pr;
 }
-function prefetch(list){const ok=list.filter(hasClip).slice(0,16);if(waReady())ok.forEach(t=>{getBuf(t).catch(()=>{});});else ok.forEach(t=>{clipURLA(t).catch(()=>{});});}
+function prefetch(list){const ok=list.filter(hasClip).slice(0,10);if(waReady())ok.forEach(t=>{getBuf(t).catch(()=>{});});else ok.forEach(t=>{clipURLA(t).catch(()=>{});});}
 function prefetchView(){try{const ts=[...document.querySelectorAll('#view [data-t]')].map(b=>b.dataset.t);prefetch(ts);}catch(e){}}
 async function playWA(t,slow,my,onStall){
  const c=actx();if(!c)throw 'no Web Audio';
  if(c.state!=='running'){await Promise.race([c.resume(),new Promise(r=>setTimeout(r,600))]);if(c.state!=='running')throw 'Web Audio locked (tap once)';}
- const buf=await Promise.race([getBuf(t),new Promise((r,j)=>setTimeout(()=>j('download too slow'),9000))]);
+ const buf=await Promise.race([getBuf(t),new Promise((r,j)=>setTimeout(()=>j('download too slow'),6000))]);
  if(my!==AU.seq)return;
  if(c.state!=='running'||AU.ctx!==c)throw 'Web Audio stopped';
  try{if(AU.el)AU.el.pause();}catch(e){}
@@ -1970,7 +1990,7 @@ function playClip(t,slow){
  const my=AU.seq;
  const okWA=()=>{if(my!==AU.seq)return;AU.lastEv='recorded voice ok';AU.path='Web Audio';AU.lastErr='';AU.fails=0;};
  const okEL=()=>{if(my!==AU.seq)return;AU.lastEv='recorded voice ok';AU.path='audio element';AU.lastErr='';AU.fails=0;};
- AU.urgent=t;
+ AU.urgent=t;try{const ix=packIx(),e=ix&&ix[t];if(e){const k=e[0]+':'+e[1];if(!AU.cr[k])clipRange(e,true).catch(()=>{});}}catch(x){}
  const toDevice=e=>{if(my!==AU.seq)return;AU.lastErr=(AU.lastErr?AU.lastErr+' · ':'')+((e&&e.name)||e);AU.fails=(AU.fails||0)+1;if(AU.fails>=2)AU.needNew=true;sayDevice(t,slow,true);};
  const viaEl=()=>playHTML(t,slow,my).then(okEL).catch(why=>{if(my!==AU.seq)return;if(why!=='skip'&&/NotSupported|media error|SecurityError/.test(String(why)))AU.htmlBad=true;if(why!=='skip')AU.lastErr='audio element: '+why;return Promise.reject(why);});
  /* slow playback keeps the pitch only in the audio element, so slow prefers it */
@@ -2157,7 +2177,7 @@ function journey(){
    nodes.push({id:t.id+':g'+c,type:'game',game:gm,title:GNAME[gm],sub:'Practise these words',words:ch.map(w=>w.id)});
   }
   (DLG_AT[t.id]||[]).forEach(did=>{const d=DLG(did);if(d)nodes.push({id:t.id+':t'+did,type:'talk',dlg:did,title:'Talk: '+d.n,sub:'Conversation with '+d.who});});
-  if(COURSE()==='pt'){const x=jxItem(u,t);if(x)nodes.push(x);}
+  if(COURSE()==='pt'){if(unitSents(t).length>=3)nodes.push({id:t.id+':s',type:'sent',title:'Sentences: '+unitSents(t).length+' from this topic',sub:'Whole sentences with audio · they join your reviews'});const x=jxItem(u,t);if(x)nodes.push(x);}
   nodes.push({id:t.id+':c',type:'check',title:'Unit check',sub:'A short quiz on this unit',words:ws.map(w=>w.id)});
   if(u%3===2)nodes.push({id:t.id+':q',type:'game',game:'quest',title:'Vocabulary Quest',sub:'Milestone level: run, jump, answer',words:[]});
   nodes.forEach(n=>{n.unit=t.id;n.i=gi++;});
@@ -2167,14 +2187,14 @@ function journey(){
 }
 const flat=()=>journey().reduce((a,u)=>a.concat(u.nodes),[]);
 /* the small verb and grammar steps are optional in units you have already finished */
-const jExtra=n=>n.type==='verb'||n.type==='gram';
+const jExtra=n=>n.type==='verb'||n.type==='gram'||n.type==='sent';
 const nextNode=()=>{for(const u of journey()){const regDone=u.nodes.filter(n=>!jExtra(n)).every(jdone);for(const n of u.nodes){if(jdone(n))continue;if(jExtra(n)&&regDone)continue;return n;}}return null;};
 function finishNode(n,st){if(!n)return;const old=S.jny[n.id];const first=old===undefined||old<0;S.jny[n.id]=Math.max(old>0?old:0,st);if(first)addXP(10);else save();}
 function launch(n){
  stopGame();ui.sess=ui.d=ui.g=ui.c=null;ui.vb=null;ui.pr=null;ui.sheet=null;ui.node=n;
  if(n.type==='learn')startSession(n.words.slice(),TB[n.unit].n,n);
  else if(n.type==='talk')dStart(n.dlg,n);
- else if(n.type==='check')chkStart(n);else if(n.type==='verb')vbOpen(n.vb,n,n.verb);else if(n.type==='gram')grOpen(n.gr,n,true);
+ else if(n.type==='check')chkStart(n);else if(n.type==='verb')vbOpen(n.vb,n,n.verb);else if(n.type==='gram')grOpen(n.gr,n,true);else if(n.type==='sent')scUnit(n);
  else{const o={node:n,words:W(n.words)};if(n.game==='match')startMatch(false,o);else if(n.game==='build')startBuild(o);else if(n.game==='listen')startListen(o);else if(n.game==='memory')startMemory(o);else if(n.game==='swipe')startSwipe(o);else if(n.game==='balloon')startBalloon(o);else startQuest(o);}
 }
 function toJourney(){stopGame();ui.sess=ui.d=ui.g=ui.c=null;ui.vb=null;ui.pr=null;ui.screen='learn';ui.lt='journey';ui.topic=null;ui.scrollCur=true;window.scrollTo(0,0);render();}
@@ -2214,7 +2234,7 @@ function vLearn(){
 }
 function vJourney(){
  const J=journey(),all=J.reduce((a,u)=>a.concat(u.nodes),[]),nx=all.find(n=>!jdone(n)),done=all.filter(jdone).length;
- const icn={learn:'learn',game:'play',talk:'talk',check:'check',verb:'learn',gram:'learn'};
+ const icn={learn:'learn',game:'play',talk:'talk',check:'check',verb:'learn',gram:'learn',sent:'talk'};
  const units=J.map(U=>{
   const nd=U.nodes.filter(jdone).length,cur=!!nx&&nx.unit===U.t.id,full=nd===U.nodes.length;
   const open=ui.jx[U.t.id]!==undefined?ui.jx[U.t.id]:cur;
@@ -3925,13 +3945,15 @@ function verbCard(){if(COURSE()!=='pt')return '';S.vb=S.vb||{};const L=VLESSONS.
 const SC_NEW=8;
 let SPOOL=null;
 function sentPool(){
- if(SPOOL)return SPOOL;const out=[],seen=new Set();
- const add=(pt,en,key,src,lv)=>{pt=String(pt||'').trim();if(!pt||!en||seen.has(pt))return;const n=pt.split(/\s+/).length;if(n<3||n>16)return;if(!hasClip(key||pt))return;seen.add(pt);out.push({pt,en,key:key||pt,src,lv:lv||2,n});};
- DIALOGS.forEach(d=>d.steps.forEach(s=>{add(s.n,s.e,null,'Talk: '+d.n,d.l);s.o.filter(o=>o[2]).forEach(o=>add(o[0],o[1],null,'Talk: '+d.n,d.l));}));
- TOPICS.forEach(t=>(t.words||[]).forEach(w=>{if(w.ex&&w.exEn)add(w.ex,w.exEn,null,t.n,t.l);}));
- PODS.forEach(p=>p.lines.forEach(l=>add(l[1],l[2],podKey(l[0],l[1]),'Podcast: '+p.t,p.lv==='B1'?3:2)));
- READS.forEach(r=>r.lines.forEach(l=>add(l[0],l[1],null,'Reading: '+r.t,2)));
- SERIES.forEach(r=>r.lines.forEach(l=>add(l[0],l[1],null,r.t,3)));
+ if(SPOOL)return SPOOL;const out=[],seen={};
+ /* every sentence also remembers the topics it belongs to (tp), so each journey unit can pick its own sentences */
+ const add=(pt,en,key,src,lv,tp)=>{pt=String(pt||'').trim();if(!pt||!en)return;if(seen[pt]){(tp||[]).forEach(x=>{if(!seen[pt].tp.includes(x))seen[pt].tp.push(x);});return;}const n=pt.split(/\s+/).length;if(n<3||n>16)return;if(!hasClip(key||pt))return;const o={pt,en,key:key||pt,src,lv:lv||2,n,tp:(tp||[]).slice()};seen[pt]=o;out.push(o);};
+ const DT={};Object.keys(DLG_AT).forEach(tid=>(DLG_AT[tid]||[]).forEach(did=>{(DT[did]=DT[did]||[]).push(tid);}));
+ TOPICS.forEach(t=>(t.words||[]).forEach(w=>{if(w.ex&&w.exEn)add(w.ex,w.exEn,null,t.n,t.l,[t.id]);}));
+ DIALOGS.forEach(d=>d.steps.forEach(s=>{add(s.n,s.e,null,'Talk: '+d.n,d.l,DT[d.id]);s.o.filter(o=>o[2]).forEach(o=>add(o[0],o[1],null,'Talk: '+d.n,d.l,DT[d.id]));}));
+ PODS.forEach(p=>p.lines.forEach(l=>add(l[1],l[2],podKey(l[0],l[1]),'Podcast: '+p.t,p.lv==='B1'?3:2,p.topics)));
+ READS.forEach(r=>r.lines.forEach(l=>add(l[0],l[1],null,'Reading: '+r.t,2,r.topics)));
+ SERIES.forEach(r=>r.lines.forEach(l=>add(l[0],l[1],null,r.t,3,r.topics)));
  GRAM.forEach(g=>g.ex.forEach(e=>add(e[0],e[1],null,'Grammar: '+g.t,g.lv==='A1'?1:g.lv==='A2'?2:3)));
  STORIES.forEach(s=>s.lines.forEach(l=>add(l[0],l[1],null,'Story: '+s.t,1)));
  /* easier first: level, then length */
@@ -3941,6 +3963,10 @@ function sentPool(){
 const scGet=pt=>{S.sc=S.sc||{};return S.sc[pt];};
 function scDue(){S.sc=S.sc||{};const t=today();return sentPool().filter(s=>{const c=S.sc[s.pt];return c&&c.due<=t;});}
 function scNewToday(){S.scn=S.scn||{};const t=today();return S.scn[t]||0;}
+/* journey: five sentences that belong to this unit's topic, the ones not yet in your rotation first */
+function unitSents(t){const tp=sentPool().filter(s=>s.tp.includes(t.id));const fresh=tp.filter(s=>!scGet(s.pt));return fresh.concat(tp.filter(s=>scGet(s.pt))).slice(0,5);}
+function scUnit(n){const t=TB[n.unit];const list=unitSents(t);if(!list.length){finishNode(n,3);toJourney();return;}
+ stopGame();ui.pr={k:'sc',q:list.map(s=>({s,isNew:!scGet(s.pt)})),i:0,flip:false,listen:!!S.scListen,done:0,ok:0,node:n};window.scrollTo(0,0);render();scSay();}
 function scStart(){
  const due=shuf(scDue()).slice(0,20);const room=Math.max(0,SC_NEW-scNewToday());
  const fresh=sentPool().filter(s=>!scGet(s.pt)).slice(0,room);
@@ -3954,9 +3980,9 @@ function scRate(r){const p=ui.pr,it=p.q[p.i];const t=today();S.sc=S.sc||{};let c
  else if(r===1){c.due=t+1;c.ok+=.5;}
  else{c.b=Math.max(0,c.b-2);c.due=t;p.q.splice(Math.min(p.q.length,p.i+4),0,{s:it.s,isNew:false,again:true});}
  c.seen++;S.scTot=(S.scTot||0)+1;wkInc('review',1);addXP(r===2?3:1);
- p.i++;p.flip=false;if(p.i>=p.q.length){p.fin=true;celebrate(true);}save();render();if(!p.fin)scSay();}
+ p.i++;p.flip=false;if(p.i>=p.q.length){p.fin=true;if(p.node){const r=p.ok/p.q.length;p.st=r>=.8?3:r>=.5?2:1;finishNode(p.node,p.st);}celebrate(true);}save();render();if(!p.fin)scSay();}
 function vSc(){const p=ui.pr;
- if(p.fin)return resHTML({win:true,stars:null,title:'Sentence cards done',sub:p.q.length+' cards · '+p.ok+' known · '+scDue().length+' still due today',btns:'<button class="btn" data-act="prx">Back to practice</button>'});
+ if(p.fin)return resHTML({win:true,stars:p.node?p.st:null,title:'Sentence cards done',sub:p.q.length+' cards · '+p.ok+' known'+(p.node?' · they come back in your reviews':' · '+scDue().length+' still due today'),btns:p.node?sumBtns(p.node,''):'<button class="btn" data-act="prx">Back to practice</button>'});
  const it=p.q[p.i],s=it.s,showTxt=!p.listen||p.flip;
  return '<div class="stack"><div class="row"><button class="ib" data-act="prx" aria-label="Close">'+ic('x')+'</button><div class="grow"><div class="pbar"><i style="width:'+Math.round(p.i/p.q.length*100)+'%"></i></div></div><button class="chipb2'+(p.listen?' on':'')+'" data-act="sclisten">'+ic('listen',16)+'Listen first</button></div>'
  +'<div class="pcard pop-in" style="align-items:stretch;gap:10px;min-height:220px"><div class="row"><span class="mut sm grow">'+(it.isNew?'New · ':'')+esc(s.src)+'</span>'+spk(s.key)+'</div>'
